@@ -322,6 +322,47 @@ test("queryStats:噪音工具(flag 误用 / 名单首段含 wecli)不计入", ()
   assert.equal(rows[0].key, "mail.163.com");
 });
 
+test("queryStats:线上噪音族过滤(IP 探测/URL 误解析/引号开头/运行时内部),真 adapter 短域保留", () => {
+  const db = freshDb();
+  const now = Date.now();
+  insertBatch(db, {
+    clientId: "c1",
+    batch: [
+      // IP 直连探测:首段以数字开头
+      rec({ ts: now, traceID: "ip1", tool: "172.21.42.189.list_weupdev_items", domain: "172.21.42.189" }),
+      rec({ ts: now, traceID: "ip2", tool: "10.107.97.39.get_wtss_status", domain: "10.107.97.39" }),
+      // URL 误解析 / 引号开头
+      rec({ ts: now, traceID: "u1", tool: "go.https://www.baidu.search", domain: "go.https://www.baidu" }),
+      rec({ ts: now, traceID: "u2", tool: "open-browser.http://itsm.weoa.copy", domain: "open-browser.http://itsm.weoa" }),
+      rec({ ts: now, traceID: "q1", tool: "'http://itsm.weoa.copy", domain: "'http://itsm.weoa" }),
+      // 名单新增:运行时内部 / 探索 / 测试垃圾
+      rec({ ts: now, traceID: "fb1", tool: "football.enrolled", domain: "football" }),
+      rec({ ts: now, traceID: "br1", tool: "binding-runtime.list", domain: "binding-runtime" }),
+      rec({ ts: now, traceID: "up1", tool: "weupdev.protocols", domain: "weupdev" }),
+      rec({ ts: now, traceID: "al1", tool: "allowance.plan", domain: "allowance" }),
+      rec({ ts: now, traceID: "pp1", tool: "pace-pipeline.basejob-ls", domain: "pace-pipeline" }),
+      // 真 adapter(短域/常规)必须保留
+      rec({ ts: now, traceID: "wd1", tool: "wedo.list-checkin-tasks", domain: "wedo" }),
+      rec({ ts: now, traceID: "it1", tool: "itsm.my_todo", domain: "itsm" }),
+      rec({ ts: now, traceID: "dpm1", tool: "dpms.release-content", domain: "dpms" }),
+      rec({ ts: now, traceID: "mp1", tool: "mockplus.set", domain: "mockplus" }),
+      // dongcha 名单只杀单段探索;正式 uat.dongcha.weoa.com(首段 uat)不受影响
+      rec({ ts: now, traceID: "dg1", tool: "dongcha.detail", domain: "dongcha" }),
+      rec({ ts: now, traceID: "dg2", tool: "uat.dongcha.weoa.com.detail", domain: "uat.dongcha.weoa.com" }),
+      // scm.link 暂不杀(避免误伤 scm.et.weoa.com)
+      rec({ ts: now, traceID: "scm1", tool: "scm.et.weoa.com.list_subsystems", domain: "scm.et.weoa.com" }),
+    ],
+  });
+  const { rows } = queryStats(db, { by: "domain", since: "1d" });
+  const keys = rows.map((r) => r.key);
+  for (const junk of ["172.21.42.189", "10.107.97.39", "go.https://www.baidu", "open-browser.http://itsm.weoa", "'http://itsm.weoa", "football", "binding-runtime", "weupdev", "allowance", "pace-pipeline", "dongcha"]) {
+    assert.ok(!keys.includes(junk), `噪音 ${junk} 应被排除`);
+  }
+  for (const real of ["wedo", "itsm", "dpms", "mockplus", "uat.dongcha.weoa.com", "scm.et.weoa.com"]) {
+    assert.ok(keys.includes(real), `真 adapter ${real} 应保留`);
+  }
+});
+
 test("noiseExcludeClause:由 NOISE_FIRST_SEGMENTS 生成,含 wecli 与 flag 排除", () => {
   const clause = noiseExcludeClause();
   assert.ok(clause.includes("'wecli'"));

@@ -26,16 +26,31 @@ export const NOISE_FIRST_SEGMENTS = new Set([
   'completion', 'mcp', 'mcp-logs', 'browser', 'login', 'auth', 'extension-path',
   'stats', 'webcli', 'wecli', 'help', 'mode', 'profiles', 'capabilities', 'tabs',
   'list_sites', 'inspect_page_state', 'evaluate_in_page', 'version', 'doctor',
+  // 2026-11 线上扫描新增:运行时内部 / 探索测试 / 误解析(与 metrics-server/db.js 同步)
+  'binding-runtime', 'weupdev', 'allowance', 'football', 'pace-pipeline',
+  'aomp-publish', 'dongcha', 'reception', 'wekm', 'itsm-raw',
+  'foo', 'birdge', 'blog-admin', 'browser_eval', 'browser_network', 'browser_state',
+  'capability', 'test-jump', 'support', 'QA20261104_UNKNOWN_ADAPTER',
 ])
 
 /**
- * 工具名首段属于 CLI 管理命令 / 误解析名('-' 开头 flag 误用)→ 视为噪音,不进看板口径。
- * 与 metrics-server/db.js 的 noiseExcludeClause 语义一致。
+ * 工具名属于噪音 → 不进看板口径。与 metrics-server/db.js 的 noiseExcludeClause 语义一致:
+ *   - '-' 开头 flag 误用
+ *   - 含 '://'(URL 误解析为工具名)
+ *   - 引号开头(解析残留)
+ *   - 首段以数字开头(IP 直连探测)
+ *   - 首段在噪音名单(CLI 管理命令 / 运行时内部 / 探索测试)
  */
 export function isNoiseTool(name) {
   const s = String(name || '')
   const first = s.includes('.') ? s.slice(0, s.indexOf('.')) : s
-  return s.startsWith('-') || NOISE_FIRST_SEGMENTS.has(first)
+  return (
+    s.startsWith('-') ||
+    s.includes('://') ||
+    s.startsWith("'") ||
+    /^[0-9]/.test(first) ||
+    NOISE_FIRST_SEGMENTS.has(first)
+  )
 }
 
 /**

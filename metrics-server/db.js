@@ -171,8 +171,11 @@ export function insertBatch(db, body) {
  * @param {{by?:string, since?:string, from?:string|null, to?:string|null, kind?:string, top?:number}} opts
  *   - by="user"：按用户聚合，返回 user×domain 二维分布（扁平 rows [{user,domain,calls}]）
  */
-// 非 adapter 的噪音工具首段（CLI 管理命令 / 误解析名）。与 webcli/metrics.js
-// 的语义保持一致：这类调用不进 adapter 统计口径。
+// 非 adapter 的噪音工具首段（CLI 管理命令 / 误解析名 / 运行时内部工具 / 探索测试产物）。
+// 与 officialWeb/src/lib/stats.js 的 NOISE_FIRST_SEGMENTS 保持逐项一致
+// （metrics-server/__tests__ 有双向漂移守卫），改动必须两侧同步。
+// 注意："dongcha" 只命中单段探索调用；正式 adapter uat.dongcha.weoa.com 首段是 uat，不受影响。
+// 未来任何站正式 adapter 化前，先确认其短名不在此名单（如 reception / wekm 当前是探索态）。
 export const NOISE_FIRST_SEGMENTS = new Set([
   "skill", "skills", "tool", "tools", "adapter", "adapters", "adapterhub",
   "service", "call", "route", "routes", "trace", "traces", "install", "list",
@@ -180,11 +183,30 @@ export const NOISE_FIRST_SEGMENTS = new Set([
   // "wecli"：与 PR #326 曾内联在聚合 SQL 里的噪音清单对齐（历史内联版比集合多此一项）
   "stats", "webcli", "wecli", "help", "mode", "profiles", "capabilities", "tabs",
   "list_sites", "inspect_page_state", "evaluate_in_page", "version", "doctor",
+  // 2026-11 线上扫描新增：运行时内部 / 探索测试 / 误解析（详见 PR #352 讨论区对照表）
+  "binding-runtime", "weupdev", "allowance", "football", "pace-pipeline",
+  "aomp-publish", "dongcha", "reception", "wekm", "itsm-raw",
+  "foo", "birdge", "blog-admin", "browser_eval", "browser_network", "browser_state",
+  "capability", "test-jump", "support", "QA20261104_UNKNOWN_ADAPTER",
 ]);
-/** 噪音排除（SQL 侧）：flag 误用（'-' 开头）与 CLI 管理命令首段的调用不计入统计。 */
+/**
+ * 噪音排除（SQL 侧），不计入统计的调用：
+ *   - flag 误用（'-' 开头）
+ *   - 工具名含 '://'（URL 误解析为工具名）
+ *   - 引号开头（解析残留）
+ *   - 首段以数字开头（IP 直连探测，如 172.21.x.x.*；真 adapter 域名不以数字开头）
+ *   - 首段在噪音名单（CLI 管理命令 / 运行时内部 / 探索测试，见 NOISE_FIRST_SEGMENTS）
+ */
 export function noiseExcludeClause() {
   const domains = [...NOISE_FIRST_SEGMENTS].map((s) => `'${s}'`).join(",");
-  return ` AND tool NOT LIKE '-%' AND substr(tool, 1, instr(tool || '.', '.') - 1) NOT IN (${domains})`;
+  const first = "substr(tool, 1, instr(tool || '.', '.') - 1)";
+  return (
+    ` AND tool NOT LIKE '-%'` +
+    ` AND tool NOT LIKE '%://%'` +
+    ` AND tool NOT LIKE '''%'` +
+    ` AND ${first} NOT GLOB '[0-9]*'` +
+    ` AND ${first} NOT IN (${domains})`
+  );
 }
 
 export function queryStats(db, { by = "domain", since = "30d", from = null, to = null, kind = null, top = null } = {}) {
